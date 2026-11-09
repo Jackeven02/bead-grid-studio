@@ -376,7 +376,8 @@ export function analyzeSourceComplexity({ data, width, height, sourceWidth = wid
   );
   const documentTexture = (smallComponentCount >= 4 && transitionDensity >= 0.025) || transitionDensity >= 0.05;
   const likelyDocument = nearWhiteRatio >= 0.48 && edgeDensity >= 0.03 && darkRatio < 0.30 && documentTexture && documentScore >= 0.60;
-  const likelyPhoto = !likelyDocument && quantizedColorCount >= 42 && flatPairRatio < 0.76;
+  const smoothProduct = edgeDensity < 0.015 && saturatedRatio < 0.25 && quantizedColorCount >= 36 && flatPairRatio >= 0.76;
+  const likelyPhoto = !likelyDocument && quantizedColorCount >= 42 && (flatPairRatio < 0.76 || smoothProduct);
 
   return {
     likelyDocument,

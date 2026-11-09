@@ -77,6 +77,22 @@ export function quantizePixels(payload) {
     const db = a[2] - b[2];
     return Math.sqrt(dl * dl + da * da + db * db);
   };
+  const oklabToSrgb = (l, a, b) => {
+    const l_ = l + 0.3963377774 * a + 0.2158037573 * b;
+    const m_ = l - 0.1055613458 * a - 0.0638541728 * b;
+    const s_ = l - 0.0894841775 * a - 1.291485548 * b;
+    const ll = l_ * l_ * l_;
+    const mm = m_ * m_ * m_;
+    const ss = s_ * s_ * s_;
+    const linearR = 4.0767416621 * ll - 3.3077115913 * mm + 0.2309699292 * ss;
+    const linearG = -1.2684380046 * ll + 2.6097574011 * mm - 0.3413193965 * ss;
+    const linearB = -0.0041960863 * ll - 0.7034186147 * mm + 1.707614701 * ss;
+    return [
+      Math.max(0, Math.min(255, Math.round(linearSrgb(linearR)))),
+      Math.max(0, Math.min(255, Math.round(linearSrgb(linearG)))),
+      Math.max(0, Math.min(255, Math.round(linearSrgb(linearB)))),
+    ];
+  };
   const rgbCieLab = (r, g, b) => {
     r = srgbLinear(r);
     g = srgbLinear(g);
@@ -731,6 +747,39 @@ export function quantizePixels(payload) {
   const detailValid = detailMode ? new Uint8Array(cols * rows) : null;
   const detailNeutralDark = detailMode ? new Uint8Array(cols * rows) : null;
   const detailWhite = detailMode ? new Uint8Array(cols * rows) : null;
+  let materialA = 0;
+  let materialB = 0;
+  let materialWeight = 0;
+  if (detailMode) {
+    for (let i = 0; i < pixelCount; i++) {
+      if (background[i]) continue;
+      const lum = luminance[i];
+      if (lum < 110 || lum > 205) continue;
+      const p = i * 4;
+      const alpha = data[p + 3] / 255;
+      if (alpha < 0.12) continue;
+      const r = Math.round(data[p] * alpha + 255 * (1 - alpha));
+      const g = Math.round(data[p + 1] * alpha + 255 * (1 - alpha));
+      const b = Math.round(data[p + 2] * alpha + 255 * (1 - alpha));
+      if (Math.max(r, g, b) - Math.min(r, g, b) > 18) continue;
+      const lab = rgbLab(r, g, b);
+      materialA += lab[1];
+      materialB += lab[2];
+      materialWeight++;
+    }
+  }
+  const retintNeutralMaterial = (r, g, b) => {
+    if (!detailMode || materialWeight < 64) return [r, g, b];
+    if (Math.max(r, g, b) - Math.min(r, g, b) > 22) return [r, g, b];
+    const lab = rgbLab(r, g, b);
+    if (lab[0] < 0.45 || lab[0] > 0.84) return [r, g, b];
+    if (Math.hypot(lab[1], lab[2]) > 0.028) return [r, g, b];
+    const ma = materialA / materialWeight;
+    const mb = materialB / materialWeight;
+    if (Math.hypot(ma, mb) < 0.003) return [r, g, b];
+    const mix = 0.78;
+    return oklabToSrgb(lab[0], lab[1] * (1 - mix) + ma * mix, lab[2] * (1 - mix) + mb * mix);
+  };
   const documentInkThreshold = Math.max(100, Math.min(170, darkThreshold + 35));
   const stepX = width / cols;
   const stepY = height / rows;
@@ -779,6 +828,10 @@ export function quantizePixels(payload) {
       let darkLg = 0;
       let darkLb = 0;
       let darkWeight = 0;
+      let chromaLr = 0;
+      let chromaLg = 0;
+      let chromaLb = 0;
+      let chromaWeight = 0;
       let valid = 0;
       let outlineSamples = 0;
       let lineCoreSamples = 0;
@@ -864,6 +917,12 @@ export function quantizePixels(payload) {
               darkLg += gLinear * weight;
               darkLb += bLinear * weight;
               darkWeight += weight;
+            }
+            if (detailMode && chroma >= 26 && saturation >= 0.12 && lum >= 145) {
+              chromaLr += rLinear * weight;
+              chromaLg += gLinear * weight;
+              chromaLb += bLinear * weight;
+              chromaWeight += weight;
             }
             continue;
           }
@@ -1015,7 +1074,11 @@ export function quantizePixels(payload) {
         let meanR = lr / totalWeight;
         let meanG = lg / totalWeight;
         let meanB = lb / totalWeight;
-        if (detailMode && darkWeight / totalWeight >= 0.24) {
+        if (detailMode && chromaWeight / totalWeight >= 0.2) {
+          meanR = chromaLr / chromaWeight;
+          meanG = chromaLg / chromaWeight;
+          meanB = chromaLb / chromaWeight;
+        } else if (detailMode && darkWeight / totalWeight >= 0.24) {
           const darkR = darkLr / darkWeight;
           const darkG = darkLg / darkWeight;
           const darkB = darkLb / darkWeight;
@@ -1238,6 +1301,51 @@ export function quantizePixels(payload) {
   }
 
   if (detailMode) {
+    const chromaOf = (r, g, b) => Math.max(r, g, b) - Math.min(r, g, b);
+    for (let pass = 0; pass < 4; pass++) {
+      const nextR = detailR.slice();
+      const nextG = detailG.slice();
+      const nextB = detailB.slice();
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const cell = y * cols + x;
+          if (!detailValid[cell] || detailWhite[cell]) continue;
+          const r = detailR[cell];
+          const g = detailG[cell];
+          const b = detailB[cell];
+          const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          const chroma = chromaOf(r, g, b);
+          let sr = 0;
+          let sg = 0;
+          let sb = 0;
+          let samples = 0;
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+            const next = ny * cols + nx;
+            if (!detailValid[next] || detailWhite[next]) continue;
+            const nr = detailR[next];
+            const ng = detailG[next];
+            const nb = detailB[next];
+            const nearLum = 0.2126 * nr + 0.7152 * ng + 0.0722 * nb;
+            if (Math.abs(nearLum - lum) > 20 || Math.abs(chromaOf(nr, ng, nb) - chroma) > 16) continue;
+            sr += nr;
+            sg += ng;
+            sb += nb;
+            samples++;
+          }
+          if (!samples) continue;
+          nextR[cell] = r * 0.35 + (sr / samples) * 0.65;
+          nextG[cell] = g * 0.35 + (sg / samples) * 0.65;
+          nextB[cell] = b * 0.35 + (sb / samples) * 0.65;
+        }
+      }
+      detailR.set(nextR);
+      detailG.set(nextG);
+      detailB.set(nextB);
+    }
+
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
         const cell = y * cols + x;
@@ -1272,15 +1380,116 @@ export function quantizePixels(payload) {
           nb /= neighbors;
           const baseLum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
           const nearLum = 0.2126 * nr + 0.7152 * ng + 0.0722 * nb;
-          const amount = Math.abs(baseLum - nearLum) >= 8 ? 0.38 : 0.18;
-          r = Math.max(0, Math.min(255, r + (r - nr) * amount));
-          g = Math.max(0, Math.min(255, g + (g - ng) * amount));
-          b = Math.max(0, Math.min(255, b + (b - nb) * amount));
           cellImportance[cell] = 1 + Math.min(2, Math.abs(baseLum - nearLum) / 42);
         }
-        grid[cell] = palette[nearestPalettePosition(Math.round(r), Math.round(g), Math.round(b), Boolean(detailNeutralDark[cell]))].index;
+        const tinted = retintNeutralMaterial(Math.round(r), Math.round(g), Math.round(b));
+        grid[cell] = palette[nearestPalettePosition(tinted[0], tinted[1], tinted[2], Boolean(detailNeutralDark[cell]))].index;
         cellSupport[cell] = 1;
       }
+    }
+
+    const neutralLab = (index) => {
+      const lab = entryByIndex.get(index)?.lab;
+      if (!lab || Math.hypot(lab[1], lab[2]) > 0.035 || lab[0] < 0.5 || lab[0] > 0.88) return null;
+      return lab;
+    };
+    const tally = new Map();
+    for (let i = 0; i < grid.length; i++) {
+      if (neutralLab(grid[i])) tally.set(grid[i], (tally.get(grid[i]) || 0) + 1);
+    }
+    let dominant = -1;
+    let dominantCount = 0;
+    for (const [index, count] of tally) {
+      if (count > dominantCount || (count === dominantCount && index < dominant)) {
+        dominant = index;
+        dominantCount = count;
+      }
+    }
+    if (dominant >= 0) {
+      const base = entryByIndex.get(dominant).lab;
+      const similar = new Set();
+      for (const index of tally.keys()) {
+        if (index === dominant) continue;
+        const lab = entryByIndex.get(index).lab;
+        if (Math.abs(lab[0] - base[0]) <= 0.08 && labDistance(lab, base) <= 0.05) similar.add(index);
+      }
+      const seen = new Uint8Array(grid.length);
+      for (let start = 0; start < grid.length; start++) {
+        const color = grid[start];
+        if (seen[start] || !similar.has(color)) continue;
+        const component = [];
+        const queue = [start];
+        seen[start] = 1;
+        let touchesDominant = false;
+        while (queue.length) {
+          const current = queue.pop();
+          component.push(current);
+          const x = current % cols;
+          const y = Math.floor(current / cols);
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+            const next = ny * cols + nx;
+            if (grid[next] === dominant) touchesDominant = true;
+            if (!seen[next] && grid[next] === color) {
+              seen[next] = 1;
+              queue.push(next);
+            }
+          }
+        }
+        if (touchesDominant && component.length * 4 < dominantCount) {
+          for (const cell of component) grid[cell] = dominant;
+        }
+      }
+    }
+  }
+
+  if (detailMode) {
+    const labOf = (index) => (index >= 0 ? entryByIndex.get(index)?.lab : null);
+    for (let pass = 0; pass < 5; pass++) {
+      const snapshot = grid.slice();
+      let changed = false;
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const cell = y * cols + x;
+          const current = snapshot[cell];
+          const currentLab = labOf(current);
+          if (!currentLab) continue;
+          const votes = new Map();
+          let same = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (!dx && !dy) continue;
+              const nx = x + dx;
+              const ny = y + dy;
+              if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+              const neighbor = snapshot[ny * cols + nx];
+              if (neighbor < 0) continue;
+              if (neighbor === current) same++;
+              else votes.set(neighbor, (votes.get(neighbor) || 0) + 1);
+            }
+          }
+          let best = -1;
+          let bestCount = 0;
+          for (const [index, count] of votes) {
+            if (count > bestCount || (count === bestCount && (best < 0 || index < best))) {
+              best = index;
+              bestCount = count;
+            }
+          }
+          if (best < 0 || bestCount < 5 || bestCount <= same) continue;
+          const bestLab = labOf(best);
+          if (!bestLab || Math.abs(currentLab[0] - bestLab[0]) > 0.16) continue;
+          const currentChroma = Math.hypot(currentLab[1], currentLab[2]);
+          const bestChroma = Math.hypot(bestLab[1], bestLab[2]);
+          const limit = currentChroma < 0.04 && bestChroma < 0.04 ? 0.13 : 0.04;
+          if (labDistance(currentLab, bestLab) > limit) continue;
+          grid[cell] = best;
+          changed = true;
+        }
+      }
+      if (!changed) break;
     }
   }
 

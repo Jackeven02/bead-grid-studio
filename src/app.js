@@ -361,7 +361,8 @@ import {
       const documentScore=clampUnit((nearWhiteRatio-.42)*1.25+edgeDensity*2.1+transitionDensity*2.4+longLineRatio*1.5+(darkRatio>.008&&darkRatio<.42?.18:0)-saturatedRatio*.45);
       const documentTexture=(smallComponentCount>=4&&transitionDensity>=.025)||transitionDensity>=.05;
       const likelyDocument=nearWhiteRatio>=.48&&edgeDensity>=.03&&darkRatio<.30&&documentTexture&&documentScore>=.60;
-      const likelyPhoto=!likelyDocument&&quantizedColorCount>=42&&flatPairRatio<.76;
+      const smoothProduct=edgeDensity<.015&&saturatedRatio<.25&&quantizedColorCount>=36&&flatPairRatio>=.76;
+      const likelyPhoto=!likelyDocument&&quantizedColorCount>=42&&(flatPairRatio<.76||smoothProduct);
       return {likelyDocument,likelyPhoto,documentScore,nearWhiteRatio,edgeDensity,transitionDensity,longLineRatio,darkRatio,saturatedRatio,quantizedColorCount,flatPairRatio,smallComponentCount,medianGlyphHeightPx};
     }
 
