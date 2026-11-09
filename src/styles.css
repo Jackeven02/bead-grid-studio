@@ -194,7 +194,7 @@
     .language-switcher > span { display: none; }
     .language-switcher button {
       min-width: 32px;
-      min-height: 30px;
+      min-height: 44px;
       padding: 4px 8px;
       color: var(--muted);
       background: transparent;
