@@ -424,7 +424,7 @@ export function recommendAutoHdSettings({ width, height, analysis, quality = 'ul
     ),
   );
   const lineArtMode = !documentMode && !photoMode && Boolean(analysis?.likelyLineArt);
-  const maxSide = documentMode ? 100 : photoMode ? (quality === 'ultra' ? 160 : 100) : lineArtMode ? 60 : (quality === 'ultra' ? 120 : 100);
+  const maxSide = documentMode ? 100 : photoMode ? (quality === 'ultra' ? 60 : 48) : lineArtMode ? 48 : (quality === 'ultra' ? 60 : 48);
   const grid = recommendDocumentGrid({ width, height, analysis, maxSide });
   return {
     cols: grid.cols,

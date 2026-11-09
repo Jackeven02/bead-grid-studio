@@ -782,6 +782,7 @@ export function quantizePixels(payload) {
   };
   const documentInkThreshold = Math.max(100, Math.min(170, darkThreshold + 35));
   const stepX = width / cols;
+  const faithfulDownscale = Math.max(cols, rows) < 100;
   const stepY = height / rows;
 
   for (let gy = 0; gy < rows; gy++) {
@@ -1074,11 +1075,11 @@ export function quantizePixels(payload) {
         let meanR = lr / totalWeight;
         let meanG = lg / totalWeight;
         let meanB = lb / totalWeight;
-        if (detailMode && chromaWeight / totalWeight >= 0.2) {
+        if (detailMode && chromaWeight / totalWeight >= (faithfulDownscale ? 0.55 : 0.2)) {
           meanR = chromaLr / chromaWeight;
           meanG = chromaLg / chromaWeight;
           meanB = chromaLb / chromaWeight;
-        } else if (detailMode && darkWeight / totalWeight >= 0.24) {
+        } else if (detailMode && !faithfulDownscale && darkWeight / totalWeight >= 0.24) {
           const darkR = darkLr / darkWeight;
           const darkG = darkLg / darkWeight;
           const darkB = darkLb / darkWeight;
@@ -1302,7 +1303,7 @@ export function quantizePixels(payload) {
 
   if (detailMode) {
     const chromaOf = (r, g, b) => Math.max(r, g, b) - Math.min(r, g, b);
-    for (let pass = 0; pass < 4; pass++) {
+    for (let pass = 0; pass < (faithfulDownscale ? 0 : 2); pass++) {
       const nextR = detailR.slice();
       const nextG = detailG.slice();
       const nextB = detailB.slice();
@@ -1388,6 +1389,7 @@ export function quantizePixels(payload) {
       }
     }
 
+    if (!faithfulDownscale) {
     const neutralLab = (index) => {
       const lab = entryByIndex.get(index)?.lab;
       if (!lab || Math.hypot(lab[1], lab[2]) > 0.035 || lab[0] < 0.5 || lab[0] > 0.88) return null;
@@ -1443,9 +1445,10 @@ export function quantizePixels(payload) {
         }
       }
     }
+    }
   }
 
-  if (detailMode) {
+  if (detailMode && !faithfulDownscale) {
     const labOf = (index) => (index >= 0 ? entryByIndex.get(index)?.lab : null);
     for (let pass = 0; pass < 5; pass++) {
       const snapshot = grid.slice();

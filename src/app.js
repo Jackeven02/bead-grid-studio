@@ -382,7 +382,7 @@ import {
         Math.max(width,height)>=1200&&(analysis?.quantizedColorCount||0)>=32&&(analysis?.flatPairRatio??1)<.84
       ));
       const lineArtMode=!documentMode&&!photoMode&&Boolean(analysis?.likelyLineArt);
-      const maxSide=documentMode?100:photoMode?(quality==='ultra'?160:100):lineArtMode?60:(quality==='ultra'?120:100);
+      const maxSide=documentMode?100:photoMode?(quality==='ultra'?60:48):lineArtMode?48:(quality==='ultra'?60:48);
       const grid=recommendDocumentGrid({width,height,analysis,maxSide});
       return {
         cols:grid.cols,rows:grid.rows,capacity:grid.cols*grid.rows,
@@ -2672,11 +2672,11 @@ import {
       const recommendation=recommendDocumentGrid({width:5680,height:5568,maxSide:100,analysis:{likelyDocument:true,medianGlyphHeightPx:28}});
       test('论文尺寸建议保持比例并诚实标记不可读',recommendation.cols===100&&recommendation.rows===98&&recommendation.requiredTextLongSide===812&&!recommendation.textReadable&&recommendation.structuralOnly);
       const portraitSmart=recommendAutoHdSettings({width:3680,height:6528,analysis:{likelyPhoto:true,likelyDocument:false},quality:'ultra'});
-      test('一键高清为竖版照片保持比例并使用160格长边',portraitSmart.cols===90&&portraitSmart.rows===160&&portraitSmart.processMode==='detail'&&portraitSmart.maxColors===48&&portraitSmart.protectDark);
+      test('一键高清为竖版照片保持比例并使用60格长边',portraitSmart.cols===34&&portraitSmart.rows===60&&portraitSmart.processMode==='detail'&&portraitSmart.maxColors===48&&portraitSmart.protectDark);
       const cartoonSmart=recommendAutoHdSettings({width:800,height:800,analysis:{likelyPhoto:false,likelyDocument:false},quality:'ultra'});
-      test('一键高清为卡通采用120格轮廓方案',cartoonSmart.cols===120&&cartoonSmart.rows===120&&cartoonSmart.processMode==='cartoon');
+      test('一键高清为卡通采用60格轮廓方案',cartoonSmart.cols===60&&cartoonSmart.rows===60&&cartoonSmart.processMode==='cartoon');
       const lineArtSmart=recommendAutoHdSettings({width:530,height:580,analysis:{likelyPhoto:false,likelyDocument:false,likelyLineArt:true},quality:'ultra'});
-      test('简单黑白线稿一键采用60格小图精修方案',lineArtSmart.cols===55&&lineArtSmart.rows===60&&lineArtSmart.processMode==='cartoon'&&lineArtSmart.maxColors===16);
+      test('简单黑白线稿一键采用48格小图精修方案',lineArtSmart.cols===44&&lineArtSmart.rows===48&&lineArtSmart.processMode==='cartoon'&&lineArtSmart.maxColors===16);
       const documentSmart=recommendAutoHdSettings({width:5680,height:5568,analysis:{likelyDocument:true,documentScore:.65,medianGlyphHeightPx:28},quality:'ultra'});
       test('一键模式不会把整页文档谎称为高清可读',documentSmart.cols===100&&documentSmart.rows===98&&documentSmart.processMode==='document'&&documentSmart.structuralOnly);
       const documentB=convertPixels(documentPayload());
